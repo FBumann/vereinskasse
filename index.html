@@ -366,6 +366,10 @@
   }
   .stock-col-num { text-align: right; }
   .stock-row .stock-col-name { font-weight: 600; }
+  .stock-row .stock-time {
+    font-weight: 400; font-size: 11px;
+    color: var(--muted); margin-top: 2px;
+  }
   .stock-row input.stock-input {
     width: 100%; text-align: right;
     padding: 8px 10px; font-size: 16px;
@@ -592,7 +596,7 @@
  */
 
 /** Single source of truth for the app version. Must match sw.js CACHE. */
-const APP_VERSION = '27';
+const APP_VERSION = '28';
 
 /** Fixed palette for menu item colors. Empty string = default (no color). */
 const COLORS = [
@@ -626,6 +630,7 @@ const KEYS = {
   active: 'club-register-active',
   orders: 'club-register-orders',
   stock: 'club-register-stock',
+  stockTime: 'club-register-stock-time',
 };
 
 /** Seed values for a fresh install so the user has something to play with. */
@@ -663,6 +668,9 @@ const state = {
   /** @type {string[]}   */ active:    load(KEYS.active,    /** @type {string[]}   */ ([])),
   /** @type {Order[]}    */ orders:    load(KEYS.orders,    /** @type {Order[]}    */ ([])),
   /** @type {Record<string, number>} */ stock: load(KEYS.stock, /** @type {Record<string, number>} */ ({})),
+  /** When each stock entry was last entered, id -> ISO string. Taken from the
+   * device clock, so it works offline. Entries made before v28 have none. */
+  /** @type {Record<string, string>} */ stockTime: load(KEYS.stockTime, /** @type {Record<string, string>} */ ({})),
   /** @type {CartLine[]} */ cart:      [],
 };
 // Persist migration of any items that had no color field.
@@ -676,6 +684,7 @@ function saveAll() {
   save(KEYS.active, state.active);
   save(KEYS.orders, state.orders);
   save(KEYS.stock, state.stock);
+  save(KEYS.stockTime, state.stockTime);
 }
 
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
@@ -997,6 +1006,7 @@ function renderEditor() {
         if (inActive) {
           state.active = state.active.filter(x => x !== item.id);
           delete state.stock[item.id];
+          delete state.stockTime[item.id];
         } else {
           state.active.push(item.id);
         }
@@ -1008,6 +1018,7 @@ function renderEditor() {
           state.reusables = state.reusables.filter(r => r.id !== item.id);
           state.active = state.active.filter(x => x !== item.id);
           delete state.stock[item.id];
+          delete state.stockTime[item.id];
           saveAll();
           renderEditor();
         });
@@ -1146,6 +1157,7 @@ importEl.addEventListener('change', async () => {
         state.reusables = parsed.reusables;
         state.active = parsed.active;
         state.stock = {};
+        state.stockTime = {};
         saveAll();
         renderEditor();
       },
@@ -1198,6 +1210,27 @@ function formatTime(iso) {
   return new Date(iso).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
 }
 
+/** Short date + time for stock entries, e.g. "19.09., 14:32". Empty string
+ * for entries that carry no timestamp (made before v28).
+ * @param {string | undefined} iso */
+function formatStamp(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })
+    + ', ' + d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+}
+
+/** Full date + time for CSV export, e.g. "19.09.2026 14:32".
+ * @param {string | undefined} iso */
+function formatStampFull(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ' '
+    + d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+}
+
 byId('exportCsv').addEventListener('click', exportCsv);
 byId('exportInventory').addEventListener('click', exportInventory);
 byId('clearDay').addEventListener('click', () => {
@@ -1206,6 +1239,7 @@ byId('clearDay').addEventListener('click', () => {
     state.orders = [];
     state.active = [];
     state.stock = {};
+    state.stockTime = {};
     state.cart = [];
     saveAll();
     renderSummary();
@@ -1248,11 +1282,12 @@ function renderStock() {
     const remaining = hasStock ? purchased - soldQty : null;
     const remainingClass = remaining !== null && remaining < 0 ? 'stock-remaining-negative' : '';
     const remainingText = remaining === null ? '—' : String(remaining);
+    const stamp = hasStock ? formatStamp(state.stockTime[id]) : '';
 
     const row = document.createElement('div');
     row.className = 'stock-row';
     row.innerHTML = `
-      <div class="stock-col-name">${escapeHtml(item.name)}</div>
+      <div class="stock-col-name">${escapeHtml(item.name)}${stamp ? `<div class="stock-time">${escapeHtml(stamp)}</div>` : ''}</div>
       <div><input class="stock-input" type="number" inputmode="numeric" placeholder="—" value="${hasStock ? purchased : ''}"></div>
       <div class="stock-col-num">${soldQty}</div>
       <div class="stock-col-num ${remainingClass}">${remainingText}</div>`;
@@ -1261,10 +1296,12 @@ function renderStock() {
       const v = input.value.trim();
       if (v === '') {
         delete state.stock[id];
+        delete state.stockTime[id];
       } else {
         const n = parseInt(v, 10);
         if (Number.isNaN(n)) return;
         state.stock[id] = n;
+        state.stockTime[id] = new Date().toISOString();
       }
       saveAll();
       renderStock();
@@ -1298,10 +1335,11 @@ function exportInventory() {
     const purchased = state.stock[id];
     const soldQty = sold.get(id)?.qty ?? 0;
     const remaining = typeof purchased === 'number' ? purchased - soldQty : '';
-    return [name, typeof purchased === 'number' ? purchased : '', soldQty, remaining];
+    const stamp = typeof purchased === 'number' ? formatStampFull(state.stockTime[id]) : '';
+    return [name, typeof purchased === 'number' ? purchased : '', stamp, soldQty, remaining];
   });
-  data.sort((a, b) => Number(b[2]) - Number(a[2]));
-  const rows = [['Artikel', 'Eingekauft', 'Verkauft', 'Übrig'], ...data];
+  data.sort((a, b) => Number(b[3]) - Number(a[3]));
+  const rows = [['Artikel', 'Eingekauft', 'Eingekauft am', 'Verkauft', 'Übrig'], ...data];
   downloadCsv(rows, `absatz-${today()}.csv`);
 }
 
