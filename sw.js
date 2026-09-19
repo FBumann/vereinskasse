@@ -1,7 +1,7 @@
 // @ts-check
 /* eslint-env serviceworker */
 
-const CACHE = 'vereinskasse-v27';
+const CACHE = 'vereinskasse-v28';
 const ASSETS = ['./', './index.html'];
 
 self.addEventListener('install', /** @param {ExtendableEvent} e */ e => {

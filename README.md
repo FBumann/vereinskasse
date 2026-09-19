@@ -37,7 +37,7 @@ Einmal mit Internetverbindung:
 
 - **Kasse** – Artikel antippen → Warenkorb → **Kassieren** → Bargeld eingeben → **Bestätigen**.
 - **Menü** – In der Bibliothek Artikel anlegen, mit `+` ins heutige Menü übernehmen.
-- **Bestand** – Eingekaufte Mengen pro Artikel eintragen, sieht direkt wie viel verkauft wurde und wie viel übrig ist.
+- **Bestand** – Eingekaufte Mengen pro Artikel eintragen, sieht direkt wie viel verkauft wurde und wie viel übrig ist. Zu jeder Eingabe wird automatisch der Zeitpunkt gespeichert (Uhr des Geräts, ohne Internet).
 - **Abrechnung** – Umsatz und Bestellungen, **Umsatz exportieren**, **Absatz exportieren**, am Ende **Zurücksetzen**.
 
 ## Sicherung
