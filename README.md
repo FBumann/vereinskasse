@@ -37,6 +37,7 @@ Einmal mit Internetverbindung:
 
 - **Kasse** – Artikel antippen → Warenkorb → **Kassieren** → Bargeld eingeben → **Bestätigen**.
 - **Menü** – In der Bibliothek Artikel anlegen, mit `+` ins heutige Menü übernehmen.
+- **Reihenfolge** – In der Kasse einen Artikel lange gedrückt halten, dann die Artikel an die gewünschte Stelle ziehen → **Fertig**.
 - **Bestand** – Eingekaufte Mengen pro Artikel eintragen, sieht direkt wie viel verkauft wurde und wie viel übrig ist.
 - **Abrechnung** – Umsatz und Bestellungen, **Umsatz exportieren**, **Absatz exportieren**, am Ende **Zurücksetzen**.
 
