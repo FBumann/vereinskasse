@@ -117,6 +117,12 @@
   .menu-item:active {
     background: var(--accent); color: white; border-color: var(--accent);
   }
+  /* Long-press feedback: the tile slowly shrinks while held. The delay keeps
+     normal taps unchanged; delay + duration must equal LONG_PRESS_MS. */
+  .menu-item.pressing {
+    scale: 0.9;
+    transition: scale 1.6s ease-in 0.4s;
+  }
   .menu-item .name { font-size: 17px; font-weight: 600; }
   .menu-item .price { font-size: 15px; color: inherit; opacity: 0.9; }
   .menu-item--custom {
@@ -538,7 +544,7 @@
       <div class="editor-section">
         <h3>Aktives Menü (heute)</h3>
         <div class="editor-list" id="activeList"></div>
-        <p class="hint">Reihenfolge ändern: In der Kasse einen Artikel lange gedrückt halten und an die gewünschte Stelle ziehen.</p>
+        <p class="hint">Reihenfolge ändern: In der Kasse einen Artikel 2 Sekunden gedrückt halten und an die gewünschte Stelle ziehen.</p>
       </div>
       <div class="editor-section">
         <h3>Bibliothek</h3>
@@ -834,7 +840,7 @@ function renderRegister() {
 // Long-press a tile to enter arrange mode (like the iOS home screen), then
 // drag tiles to reorder. The order is state.active, so it also applies to
 // the editor and stock lists. Stays on until "Fertig" or a tab switch.
-const LONG_PRESS_MS = 500;
+const LONG_PRESS_MS = 2000; // long on purpose: must never trigger by accident while selling
 const LONG_PRESS_TOLERANCE = 10;
 const AUTOSCROLL_EDGE = 48;
 
@@ -876,12 +882,14 @@ function onTilePointerDown(e, tile) {
   const x0 = e.clientX, y0 = e.clientY;
   let x = x0, y = y0;
   const ac = new AbortController();
+  tile.classList.add('pressing');
   const timer = setTimeout(() => {
     ac.abort();
+    tile.classList.remove('pressing');
     setArranging(true);
     startDrag(pointerId, x, y, tile);
   }, LONG_PRESS_MS);
-  const cancel = () => { clearTimeout(timer); ac.abort(); };
+  const cancel = () => { clearTimeout(timer); ac.abort(); tile.classList.remove('pressing'); };
   window.addEventListener('pointermove', ev => {
     if (ev.pointerId !== pointerId) return;
     x = ev.clientX; y = ev.clientY;
