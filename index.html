@@ -631,11 +631,28 @@ const KEYS = {
 /** Seed values for a fresh install so the user has something to play with. */
 /** @type {MenuItem[]} */
 const DEFAULT_REUSABLES = [
-  { id: 'default-kaffee',         name: 'Kaffee',         price: 1.5, color: '#d97706' }, // amber
-  { id: 'default-kuchen',         name: 'Kuchen',         price: 2,   color: '#e11d48' }, // rose
+  { id: 'default-kaffee',         name: 'Kaffee',         price: 1.5, color: '#f59e0b' }, // amber
+  { id: 'default-kuchen',         name: 'Kuchen',         price: 2,   color: '#f43f5e' }, // rose
   { id: 'default-kartoffelsalat', name: 'Kartoffelsalat', price: 3,   color: '#84cc16' }, // lime
-  { id: 'default-bier',           name: 'Bier',           price: 2.5, color: '#2563eb' }, // blue
+  { id: 'default-bier',           name: 'Bier',           price: 2.5, color: '#3b82f6' }, // blue
 ];
+
+/** Seed colors of v27 and earlier, which were not in COLORS. */
+/** @type {Record<string, string>} */
+const LEGACY_COLORS = { '#d97706': '#f59e0b', '#e11d48': '#f43f5e', '#2563eb': '#3b82f6' };
+
+/**
+ * Map any stored or imported color onto the fixed palette. Unknown values
+ * become '' (default) — this also keeps imported files from injecting
+ * arbitrary strings into style attributes.
+ * @param {unknown} c
+ * @returns {string}
+ */
+function normalizeColor(c) {
+  if (typeof c !== 'string') return '';
+  const v = LEGACY_COLORS[c.toLowerCase()] ?? c.toLowerCase();
+  return COLORS.some(p => p.value === v) ? v : '';
+}
 
 
 // First launch only: inject defaults if the reusables key has never been set.
@@ -659,7 +676,7 @@ function save(key, val) {
 
 const state = {
   /** @type {MenuItem[]} */ reusables: load(KEYS.reusables, /** @type {MenuItem[]} */ ([]))
-    .map(r => ({ ...r, color: typeof r.color === 'string' ? r.color : '' })),
+    .map(r => ({ ...r, color: normalizeColor(r.color) })),
   /** @type {string[]}   */ active:    load(KEYS.active,    /** @type {string[]}   */ ([])),
   /** @type {Order[]}    */ orders:    load(KEYS.orders,    /** @type {Order[]}    */ ([])),
   /** @type {Record<string, number>} */ stock: load(KEYS.stock, /** @type {Record<string, number>} */ ({})),
@@ -930,6 +947,12 @@ function renderNewColorPicker() {
   });
 }
 
+/** @param {HTMLElement} row @param {string} color */
+function setDotColor(row, color) {
+  const dot = /** @type {HTMLElement} */ (row.querySelector('.color-dot'));
+  dot.style.background = color;
+}
+
 function renderEditor() {
   renderNewColorPicker();
   const activeEl = byId('activeList');
@@ -945,9 +968,8 @@ function renderEditor() {
       if (!item) return;
       const row = document.createElement('div');
       row.className = 'editor-row';
-      const dotStyle = item.color ? `background: ${item.color}` : '';
       row.innerHTML = `
-        <span class="color-dot" style="${dotStyle}"></span>
+        <span class="color-dot"></span>
         <div class="info">
           <div class="name">${escapeHtml(item.name)}</div>
           <div class="price">${fmt(item.price)}</div>
@@ -955,6 +977,7 @@ function renderEditor() {
         <div class="actions">
           <button class="icon-btn" data-remove>−</button>
         </div>`;
+      setDotColor(row, item.color);
       row.querySelector('[data-remove]')?.addEventListener('click', () => {
         state.active = state.active.filter(x => x !== id);
         save(KEYS.active, state.active);
@@ -973,9 +996,8 @@ function renderEditor() {
       const inActive = state.active.includes(item.id);
       const row = document.createElement('div');
       row.className = 'editor-row';
-      const dotStyle = item.color ? `background: ${item.color}` : '';
       row.innerHTML = `
-        <span class="color-dot" style="${dotStyle}"></span>
+        <span class="color-dot"></span>
         <button class="info" data-edit aria-label="Artikel bearbeiten">
           <div class="name">${escapeHtml(item.name)}</div>
           <div class="price">${fmt(item.price)}</div>
@@ -984,6 +1006,7 @@ function renderEditor() {
           <button class="icon-btn ${inActive ? 'active' : ''}" data-toggle>${inActive ? '✓' : '+'}</button>
           <button class="icon-btn danger" data-delete><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg></button>
         </div>`;
+      setDotColor(row, item.color);
       row.querySelector('[data-edit]')?.addEventListener('click', () => {
         editItemModal(item, (name, price, color) => {
           item.name = name;
@@ -1089,8 +1112,8 @@ function isRawMenuItem(d) {
 }
 
 /**
- * Coerce a validated raw item into a full MenuItem by normalising the
- * optional color field. Accepts items with any extra keys.
+ * Coerce a validated raw item into a full MenuItem, mapping the color
+ * onto the palette. Accepts items with any extra keys.
  * @param {{ id: string, name: string, price: number, color?: unknown }} raw
  * @returns {MenuItem}
  */
@@ -1099,7 +1122,7 @@ function toMenuItem(raw) {
     id: raw.id,
     name: raw.name,
     price: raw.price,
-    color: isString(raw.color) ? raw.color : '',
+    color: normalizeColor(raw.color),
   };
 }
 
