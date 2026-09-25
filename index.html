@@ -694,6 +694,7 @@ const state = {
   /** @type {Record<string, number>} */ stock: load(KEYS.stock, /** @type {Record<string, number>} */ ({})),
   /** @type {CartLine[]} */ cart:      [],
 };
+roundPrices(state.reusables); // prices with >2 decimals were allowed up to v27
 // Persist migration of any items that had no color field.
 save(KEYS.reusables, state.reusables);
 
@@ -721,8 +722,8 @@ function parseEur(str) {
 }
 
 /**
- * Price validation: any valid number. Accepts negative, zero, and
- * positive values. `,` or `.` as decimal separator.
+ * Price validation: negative, zero, or positive, with at most two
+ * decimals. `,` or `.` as decimal separator.
  * @param {string} str
  * @returns {{ ok: true, value: number } | { ok: false, error: string }}
  */
@@ -732,7 +733,22 @@ function validatePrice(str) {
   if (!/^-?\d+(?:[,.]\d+)?$/.test(cleaned)) {
     return { ok: false, error: 'Ungültiger Preis' };
   }
+  if (!/^-?\d+(?:[,.]\d{1,2})?$/.test(cleaned)) {
+    return { ok: false, error: 'Höchstens 2 Nachkommastellen' };
+  }
   return { ok: true, value: parseFloat(cleaned.replace(',', '.')) };
+}
+
+/** @param {number} n */
+function roundCents(n) { return Math.round(n * 100) / 100; }
+
+/**
+ * Round prices to cents in place (for stored data and imported files).
+ * @param {MenuItem[]} items
+ */
+function roundPrices(items) {
+  items.forEach(r => { r.price = roundCents(r.price); });
+  return items;
 }
 
 /**
@@ -1179,7 +1195,7 @@ importEl.addEventListener('change', async () => {
       'Vorlage laden?',
       `${parsed.reusables.length} Artikel · ${parsed.active.length} im aktiven Menü. ${replaced}`,
       () => {
-        state.reusables = parsed.reusables;
+        state.reusables = roundPrices(parsed.reusables);
         state.active = parsed.active;
         state.stock = {};
         saveAll();
