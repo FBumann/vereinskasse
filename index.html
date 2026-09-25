@@ -1101,9 +1101,8 @@ byId('exportLib').addEventListener('click', () => {
   const blob = new Blob([json], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  const stamp = new Date().toISOString().slice(0, 10);
   a.href = url;
-  a.download = `vorlage-${stamp}.json`;
+  a.download = `vorlage-${today()}.json`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -1322,10 +1321,10 @@ function exportCsv() {
   // Semicolon-separated for EU locale Excel/Numbers
   const sep = ';';
   /** @type {(string | number)[][]} */
-  const rows = [['Bestellung', 'Zeit', 'Artikel', 'Anzahl', 'Einzelpreis', 'Gesamt']];
+  const rows = [['Bestellung', 'Zeitpunkt', 'Artikel', 'Anzahl', 'Einzelpreis', 'Gesamt']];
   state.orders.forEach((o, idx) => {
     const nr = idx + 1;
-    const time = formatTime(o.time);
+    const time = formatDateTime(o.time);
     o.items.forEach(i => {
       rows.push([nr, time, i.name, i.qty, csvNum(i.price), csvNum(i.price * i.qty)]);
     });
@@ -1364,7 +1363,24 @@ function downloadCsv(rows, filename) {
   URL.revokeObjectURL(url);
 }
 
-function today() { return new Date().toISOString().slice(0, 10); }
+/** @param {number} n */
+const pad2 = n => String(n).padStart(2, '0');
+
+/** Local date as YYYY-MM-DD, for file names. Uses the device's time zone. */
+function today() {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+/**
+ * Local date and time as "TT.MM.JJJJ HH:MM" in the device's time zone —
+ * German Excel/Numbers read this as a date-time value.
+ * @param {string} iso
+ */
+function formatDateTime(iso) {
+  const d = new Date(iso);
+  return `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${d.getFullYear()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
 
 /** @param {number} n */
 function csvNum(n) { return n.toFixed(2).replace('.', ','); }
