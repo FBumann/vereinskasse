@@ -2,7 +2,7 @@
 /* eslint-env serviceworker */
 
 // Must match APP_VERSION in index.html.
-const VERSION = '28';
+const VERSION = '29';
 const ASSETS = ['./', './index.html'];
 
 const sw = /** @type {ServiceWorkerGlobalScope} */ (/** @type {unknown} */ (self));
