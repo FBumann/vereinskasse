@@ -330,6 +330,14 @@
   .about-footer .about-links a { margin: 0 6px; white-space: nowrap; }
   .about-footer .about-version { font-size: 12px; }
   .about-footer .about-fine { font-size: 11px; font-style: italic; margin-top: 6px; }
+  .update-banner {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--surface); border: 1px solid var(--accent);
+    border-radius: 12px; padding: 10px 10px 10px 16px; margin-bottom: 14px;
+    font-size: 15px;
+  }
+  .update-banner span { flex: 1; }
+  .update-banner .btn { flex: 0 0 auto; min-height: 44px; font-size: 15px; }
   .form-error {
     margin: 0; padding: 4px 2px 0 2px;
     color: var(--danger); font-size: 13px; line-height: 1.3;
@@ -489,6 +497,10 @@
 
     <!-- EDITOR -->
     <section id="editor" class="screen">
+      <div class="update-banner" id="updateBanner" hidden>
+        <span>Neue Version v<span id="updateVersion"></span> verfügbar</span>
+        <button class="btn btn-primary" id="applyUpdate">Aktualisieren</button>
+      </div>
       <div class="editor-section">
         <h3>Aktives Menü (heute)</h3>
         <div class="editor-list" id="activeList"></div>
@@ -575,7 +587,6 @@
       <input class="modal-form-input" id="modalEditName" type="text" placeholder="Name">
       <input class="modal-form-input" id="modalEditPrice" type="text" inputmode="decimal" placeholder="0,00">
     </div>
-    <input class="input-cash" id="modalInput" type="text" inputmode="decimal" placeholder="0,00" hidden>
     <p class="form-error" id="modalError" hidden></p>
     <div class="modal-actions">
       <button class="btn btn-secondary" id="modalCancel">Abbrechen</button>
@@ -595,8 +606,8 @@
  * @typedef {{ id: string, time: string, items: OrderLine[], total: number }} Order
  */
 
-/** Single source of truth for the app version. Must match sw.js CACHE. */
-const APP_VERSION = '28';
+/** Single source of truth for the app version. Must match sw.js VERSION. */
+const APP_VERSION = '30';
 
 /** Fixed palette for menu item colors. Empty string = default (no color). */
 const COLORS = [
@@ -636,11 +647,28 @@ const KEYS = {
 /** Seed values for a fresh install so the user has something to play with. */
 /** @type {MenuItem[]} */
 const DEFAULT_REUSABLES = [
-  { id: 'default-kaffee',         name: 'Kaffee',         price: 1.5, color: '#d97706' }, // amber
-  { id: 'default-kuchen',         name: 'Kuchen',         price: 2,   color: '#e11d48' }, // rose
+  { id: 'default-kaffee',         name: 'Kaffee',         price: 1.5, color: '#f59e0b' }, // amber
+  { id: 'default-kuchen',         name: 'Kuchen',         price: 2,   color: '#f43f5e' }, // rose
   { id: 'default-kartoffelsalat', name: 'Kartoffelsalat', price: 3,   color: '#84cc16' }, // lime
-  { id: 'default-bier',           name: 'Bier',           price: 2.5, color: '#2563eb' }, // blue
+  { id: 'default-bier',           name: 'Bier',           price: 2.5, color: '#3b82f6' }, // blue
 ];
+
+/** Seed colors of v27 and earlier, which were not in COLORS. */
+/** @type {Record<string, string>} */
+const LEGACY_COLORS = { '#d97706': '#f59e0b', '#e11d48': '#f43f5e', '#2563eb': '#3b82f6' };
+
+/**
+ * Map any stored or imported color onto the fixed palette. Unknown values
+ * become '' (default) — this also keeps imported files from injecting
+ * arbitrary strings into style attributes.
+ * @param {unknown} c
+ * @returns {string}
+ */
+function normalizeColor(c) {
+  if (typeof c !== 'string') return '';
+  const v = LEGACY_COLORS[c.toLowerCase()] ?? c.toLowerCase();
+  return COLORS.some(p => p.value === v) ? v : '';
+}
 
 
 // First launch only: inject defaults if the reusables key has never been set.
@@ -664,15 +692,16 @@ function save(key, val) {
 
 const state = {
   /** @type {MenuItem[]} */ reusables: load(KEYS.reusables, /** @type {MenuItem[]} */ ([]))
-    .map(r => ({ ...r, color: typeof r.color === 'string' ? r.color : '' })),
+    .map(r => ({ ...r, color: normalizeColor(r.color) })),
   /** @type {string[]}   */ active:    load(KEYS.active,    /** @type {string[]}   */ ([])),
   /** @type {Order[]}    */ orders:    load(KEYS.orders,    /** @type {Order[]}    */ ([])),
   /** @type {Record<string, number>} */ stock: load(KEYS.stock, /** @type {Record<string, number>} */ ({})),
   /** When each stock entry was last entered, id -> ISO string. Taken from the
-   * device clock, so it works offline. Entries made before v28 have none. */
+   * device clock, so it works offline. Older entries have none. */
   /** @type {Record<string, string>} */ stockTime: load(KEYS.stockTime, /** @type {Record<string, string>} */ ({})),
   /** @type {CartLine[]} */ cart:      [],
 };
+roundPrices(state.reusables); // prices with >2 decimals were allowed up to v27
 // Persist migration of any items that had no color field.
 save(KEYS.reusables, state.reusables);
 
@@ -701,8 +730,8 @@ function parseEur(str) {
 }
 
 /**
- * Price validation: any valid number. Accepts negative, zero, and
- * positive values. `,` or `.` as decimal separator.
+ * Price validation: negative, zero, or positive, with at most two
+ * decimals. `,` or `.` as decimal separator.
  * @param {string} str
  * @returns {{ ok: true, value: number } | { ok: false, error: string }}
  */
@@ -712,7 +741,22 @@ function validatePrice(str) {
   if (!/^-?\d+(?:[,.]\d+)?$/.test(cleaned)) {
     return { ok: false, error: 'Ungültiger Preis' };
   }
+  if (!/^-?\d+(?:[,.]\d{1,2})?$/.test(cleaned)) {
+    return { ok: false, error: 'Höchstens 2 Nachkommastellen' };
+  }
   return { ok: true, value: parseFloat(cleaned.replace(',', '.')) };
+}
+
+/** @param {number} n */
+function roundCents(n) { return Math.round(n * 100) / 100; }
+
+/**
+ * Round prices to cents in place (for stored data and imported files).
+ * @param {MenuItem[]} items
+ */
+function roundPrices(items) {
+  items.forEach(r => { r.price = roundCents(r.price); });
+  return items;
 }
 
 /**
@@ -785,10 +829,10 @@ function renderRegister() {
 }
 
 function openCustomAmount() {
-  priceInputModal('Freier Betrag', price => {
+  customAmountModal((name, price) => {
     state.cart.push({
       id: 'custom-' + uid(),
-      name: 'Sonstiges',
+      name,
       price,
       color: '',
       qty: 1,
@@ -797,7 +841,6 @@ function openCustomAmount() {
   });
 }
 
-/** @param {MenuItem} item */
 /** @param {MenuItem} item */
 function addToCart(item) {
   const existing = state.cart.find(c => c.id === item.id);
@@ -939,7 +982,14 @@ function renderNewColorPicker() {
   });
 }
 
+/** @param {HTMLElement} row @param {string} color */
+function setDotColor(row, color) {
+  const dot = /** @type {HTMLElement} */ (row.querySelector('.color-dot'));
+  dot.style.background = color;
+}
+
 function renderEditor() {
+  checkForUpdate();
   renderNewColorPicker();
   const activeEl = byId('activeList');
   const libEl = byId('libraryList');
@@ -954,9 +1004,8 @@ function renderEditor() {
       if (!item) return;
       const row = document.createElement('div');
       row.className = 'editor-row';
-      const dotStyle = item.color ? `background: ${item.color}` : '';
       row.innerHTML = `
-        <span class="color-dot" style="${dotStyle}"></span>
+        <span class="color-dot"></span>
         <div class="info">
           <div class="name">${escapeHtml(item.name)}</div>
           <div class="price">${fmt(item.price)}</div>
@@ -964,6 +1013,7 @@ function renderEditor() {
         <div class="actions">
           <button class="icon-btn" data-remove>−</button>
         </div>`;
+      setDotColor(row, item.color);
       row.querySelector('[data-remove]')?.addEventListener('click', () => {
         state.active = state.active.filter(x => x !== id);
         save(KEYS.active, state.active);
@@ -982,9 +1032,8 @@ function renderEditor() {
       const inActive = state.active.includes(item.id);
       const row = document.createElement('div');
       row.className = 'editor-row';
-      const dotStyle = item.color ? `background: ${item.color}` : '';
       row.innerHTML = `
-        <span class="color-dot" style="${dotStyle}"></span>
+        <span class="color-dot"></span>
         <button class="info" data-edit aria-label="Artikel bearbeiten">
           <div class="name">${escapeHtml(item.name)}</div>
           <div class="price">${fmt(item.price)}</div>
@@ -993,6 +1042,7 @@ function renderEditor() {
           <button class="icon-btn ${inActive ? 'active' : ''}" data-toggle>${inActive ? '✓' : '+'}</button>
           <button class="icon-btn danger" data-delete><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg></button>
         </div>`;
+      setDotColor(row, item.color);
       row.querySelector('[data-edit]')?.addEventListener('click', () => {
         editItemModal(item, (name, price, color) => {
           item.name = name;
@@ -1073,9 +1123,8 @@ byId('exportLib').addEventListener('click', () => {
   const blob = new Blob([json], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  const stamp = new Date().toISOString().slice(0, 10);
   a.href = url;
-  a.download = `vorlage-${stamp}.json`;
+  a.download = `vorlage-${today()}.json`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -1100,8 +1149,8 @@ function isRawMenuItem(d) {
 }
 
 /**
- * Coerce a validated raw item into a full MenuItem by normalising the
- * optional color field. Accepts items with any extra keys.
+ * Coerce a validated raw item into a full MenuItem, mapping the color
+ * onto the palette. Accepts items with any extra keys.
  * @param {{ id: string, name: string, price: number, color?: unknown }} raw
  * @returns {MenuItem}
  */
@@ -1110,7 +1159,7 @@ function toMenuItem(raw) {
     id: raw.id,
     name: raw.name,
     price: raw.price,
-    color: isString(raw.color) ? raw.color : '',
+    color: normalizeColor(raw.color),
   };
 }
 
@@ -1154,7 +1203,7 @@ importEl.addEventListener('change', async () => {
       'Vorlage laden?',
       `${parsed.reusables.length} Artikel · ${parsed.active.length} im aktiven Menü. ${replaced}`,
       () => {
-        state.reusables = parsed.reusables;
+        state.reusables = roundPrices(parsed.reusables);
         state.active = parsed.active;
         state.stock = {};
         state.stockTime = {};
@@ -1211,7 +1260,7 @@ function formatTime(iso) {
 }
 
 /** Short date + time for stock entries, e.g. "19.09., 14:32". Empty string
- * for entries that carry no timestamp (made before v28).
+ * for entries that carry no timestamp (made before this was added).
  * @param {string | undefined} iso */
 function formatStamp(iso) {
   if (!iso) return '';
@@ -1221,14 +1270,12 @@ function formatStamp(iso) {
     + ', ' + d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
 }
 
-/** Full date + time for CSV export, e.g. "19.09.2026 14:32".
+/** Full date + time for CSV export, same format as the Umsatz export's
+ * Zeitpunkt column. Empty for entries without a valid timestamp.
  * @param {string | undefined} iso */
 function formatStampFull(iso) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ' '
-    + d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+  if (!iso || Number.isNaN(new Date(iso).getTime())) return '';
+  return formatDateTime(iso);
 }
 
 byId('exportCsv').addEventListener('click', exportCsv);
@@ -1247,14 +1294,16 @@ byId('clearDay').addEventListener('click', () => {
 });
 
 /** Tally items sold per id across all orders. Old orders only stored
- * name; resolve those via the current library. */
+ * name; resolve those via the current library. Free amounts ("Sonstiges")
+ * get a fresh id each time, so they are grouped by name instead. */
 function soldByItem() {
   const nameToId = new Map(state.reusables.map(r => [r.name, r.id]));
   /** @type {Map<string, { name: string, qty: number }>} */
   const counts = new Map();
   state.orders.forEach(o => {
     o.items.forEach(i => {
-      const id = i.id ?? nameToId.get(i.name) ?? i.name;
+      const id = i.id?.startsWith('custom-') ? 'custom:' + i.name
+        : i.id ?? nameToId.get(i.name) ?? i.name;
       const entry = counts.get(id) ?? { name: i.name, qty: 0 };
       entry.qty += i.qty;
       counts.set(id, entry);
@@ -1278,19 +1327,28 @@ function renderStock() {
     if (!item) return;
     const purchased = state.stock[id];
     const soldQty = sold.get(id)?.qty ?? 0;
-    const hasStock = typeof purchased === 'number';
-    const remaining = hasStock ? purchased - soldQty : null;
-    const remainingClass = remaining !== null && remaining < 0 ? 'stock-remaining-negative' : '';
-    const remainingText = remaining === null ? '—' : String(remaining);
-    const stamp = hasStock ? formatStamp(state.stockTime[id]) : '';
 
     const row = document.createElement('div');
     row.className = 'stock-row';
     row.innerHTML = `
-      <div class="stock-col-name">${escapeHtml(item.name)}${stamp ? `<div class="stock-time">${escapeHtml(stamp)}</div>` : ''}</div>
-      <div><input class="stock-input" type="number" inputmode="numeric" placeholder="—" value="${hasStock ? purchased : ''}"></div>
+      <div class="stock-col-name">${escapeHtml(item.name)}<div class="stock-time" data-time></div></div>
+      <div><input class="stock-input" type="number" inputmode="numeric" placeholder="—" value="${typeof purchased === 'number' ? purchased : ''}"></div>
       <div class="stock-col-num">${soldQty}</div>
-      <div class="stock-col-num ${remainingClass}">${remainingText}</div>`;
+      <div class="stock-col-num" data-remaining></div>`;
+    const remainingEl = /** @type {HTMLElement} */ (row.querySelector('[data-remaining]'));
+    const timeEl = /** @type {HTMLElement} */ (row.querySelector('[data-time]'));
+    const updateRow = () => {
+      const p = state.stock[id];
+      const remaining = typeof p === 'number' ? p - soldQty : null;
+      remainingEl.textContent = remaining === null ? '—' : String(remaining);
+      remainingEl.classList.toggle('stock-remaining-negative', remaining !== null && remaining < 0);
+      const stamp = typeof p === 'number' ? formatStamp(state.stockTime[id]) : '';
+      timeEl.textContent = stamp;
+      timeEl.hidden = !stamp;
+    };
+    updateRow();
+    // Only this row is updated (no full re-render), so tapping the next
+    // input keeps its focus and the keyboard stays open.
     const input = /** @type {HTMLInputElement} */ (row.querySelector('input.stock-input'));
     input.addEventListener('change', () => {
       const v = input.value.trim();
@@ -1303,8 +1361,9 @@ function renderStock() {
         state.stock[id] = n;
         state.stockTime[id] = new Date().toISOString();
       }
-      saveAll();
-      renderStock();
+      save(KEYS.stock, state.stock);
+      save(KEYS.stockTime, state.stockTime);
+      updateRow();
     });
     list.appendChild(row);
   });
@@ -1314,10 +1373,10 @@ function exportCsv() {
   // Semicolon-separated for EU locale Excel/Numbers
   const sep = ';';
   /** @type {(string | number)[][]} */
-  const rows = [['Bestellung', 'Zeit', 'Artikel', 'Anzahl', 'Einzelpreis', 'Gesamt']];
+  const rows = [['Bestellung', 'Zeitpunkt', 'Artikel', 'Anzahl', 'Einzelpreis', 'Gesamt']];
   state.orders.forEach((o, idx) => {
     const nr = idx + 1;
-    const time = formatTime(o.time);
+    const time = formatDateTime(o.time);
     o.items.forEach(i => {
       rows.push([nr, time, i.name, i.qty, csvNum(i.price), csvNum(i.price * i.qty)]);
     });
@@ -1357,7 +1416,24 @@ function downloadCsv(rows, filename) {
   URL.revokeObjectURL(url);
 }
 
-function today() { return new Date().toISOString().slice(0, 10); }
+/** @param {number} n */
+const pad2 = n => String(n).padStart(2, '0');
+
+/** Local date as YYYY-MM-DD, for file names. Uses the device's time zone. */
+function today() {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+/**
+ * Local date and time as "TT.MM.JJJJ HH:MM" in the device's time zone —
+ * German Excel/Numbers read this as a date-time value.
+ * @param {string} iso
+ */
+function formatDateTime(iso) {
+  const d = new Date(iso);
+  return `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${d.getFullYear()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
 
 /** @param {number} n */
 function csvNum(n) { return n.toFixed(2).replace('.', ','); }
@@ -1382,7 +1458,6 @@ function resetModal() {
   byId('modalText').textContent = '';
   byId('modalPalette').hidden = true;
   byId('modalForm').hidden = true;
-  /** @type {HTMLInputElement} */ (byId('modalInput')).hidden = true;
   clearModalError();
   const confirmBtn = /** @type {HTMLElement} */ (byId('modalConfirm'));
   confirmBtn.hidden = false;
@@ -1424,22 +1499,28 @@ function confirmModal(title, text, cb) {
   byId('modal').classList.add('active');
 }
 
-/** @param {string} title @param {(price: number) => void} cb */
-function priceInputModal(title, cb) {
+/**
+ * Free amount for the cart, with an optional name (defaults to "Sonstiges").
+ * @param {(name: string, price: number) => void} cb
+ */
+function customAmountModal(cb) {
   resetModal();
-  byId('modalTitle').textContent = title;
-  const input = /** @type {HTMLInputElement} */ (byId('modalInput'));
-  input.hidden = false;
-  input.value = '';
+  byId('modalTitle').textContent = 'Freier Betrag';
+  byId('modalForm').hidden = false;
+  const nameIn = /** @type {HTMLInputElement} */ (byId('modalEditName'));
+  const priceIn = /** @type {HTMLInputElement} */ (byId('modalEditPrice'));
+  nameIn.value = '';
+  nameIn.placeholder = 'Bezeichnung (optional)';
+  priceIn.value = '';
   useSaveButton();
   modalCb = () => {
     clearModalError();
-    const v = validatePrice(input.value);
-    if (!v.ok) { showModalError(v.error); return false; }
-    cb(v.value);
+    const p = validatePrice(priceIn.value);
+    if (!p.ok) { showModalError(p.error); return false; }
+    cb(nameIn.value.trim() || 'Sonstiges', p.value);
   };
   byId('modal').classList.add('active');
-  setTimeout(() => input.focus(), 50);
+  setTimeout(() => priceIn.focus(), 50);
 }
 
 /**
@@ -1453,6 +1534,7 @@ function editItemModal(item, cb) {
   const nameIn = /** @type {HTMLInputElement} */ (byId('modalEditName'));
   const priceIn = /** @type {HTMLInputElement} */ (byId('modalEditPrice'));
   nameIn.value = item.name;
+  nameIn.placeholder = 'Name';
   priceIn.value = item.price.toFixed(2).replace('.', ',');
 
   // Inline color picker — tracks a local selection and updates the palette visuals.
@@ -1519,16 +1601,57 @@ byId('resetAll').addEventListener('click', () => {
   );
 });
 
-// ---- Service Worker (für Offline-Betrieb) ----
+// ---- Service Worker (für Offline-Betrieb) & Updates ----
+// The browser downloads new versions in the background, but sw.js keeps
+// serving the pinned version. A newer download is offered in the Menü tab
+// and only switched to when the user taps "Aktualisieren".
+const SW_META = 'vereinskasse-meta';
+
+/** @returns {Promise<{ scope: string, latest: string | null } | null>} */
+async function swVersions() {
+  if (!('serviceWorker' in navigator) || !('caches' in window)) return null;
+  const reg = await navigator.serviceWorker.getRegistration();
+  if (!reg) return null;
+  const res = await caches.match(reg.scope + '__latest', { cacheName: SW_META });
+  return { scope: reg.scope, latest: res ? await res.text() : null };
+}
+
+async function checkForUpdate() {
+  const v = await swVersions().catch(() => null);
+  const newer = v?.latest && Number(v.latest) > Number(APP_VERSION) ? v.latest : null;
+  byId('updateBanner').hidden = !newer;
+  if (newer) byId('updateVersion').textContent = newer;
+}
+
+async function applyUpdate() {
+  const v = await swVersions();
+  if (!v?.latest) return;
+  const meta = await caches.open(SW_META);
+  await meta.put(v.scope + '__pinned', new Response(v.latest));
+  location.reload();
+}
+
+byId('applyUpdate').addEventListener('click', () => {
+  confirmModal(
+    'Jetzt aktualisieren?',
+    'Artikel, Menü, Bestand und Bestellungen bleiben erhalten. Tipp: Nicht während einer Veranstaltung aktualisieren.',
+    () => { applyUpdate(); },
+  );
+  useSaveButton();
+});
+
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./sw.js').catch(() => { /* ignored on file:// */ });
   });
+  // A newly downloaded version takes control shortly after launch.
+  navigator.serviceWorker.addEventListener('controllerchange', checkForUpdate);
 }
 
 // ---- Init ----
 byId('appVersion').textContent = APP_VERSION;
 renderRegister();
+checkForUpdate();
 </script>
 </body>
 </html>

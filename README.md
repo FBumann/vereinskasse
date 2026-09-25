@@ -35,7 +35,7 @@ Einmal mit Internetverbindung:
 
 ## Bedienen
 
-- **Kasse** – Artikel antippen → Warenkorb → **Kassieren** → Bargeld eingeben → **Bestätigen**.
+- **Kasse** – Artikel antippen → Warenkorb → **Kassieren** → Bargeld eingeben → **Bestätigen**. **+ Sonstiges** für freie Beträge, optional mit Bezeichnung (z. B. „Tombola").
 - **Menü** – In der Bibliothek Artikel anlegen, mit `+` ins heutige Menü übernehmen.
 - **Bestand** – Eingekaufte Mengen pro Artikel eintragen, sieht direkt wie viel verkauft wurde und wie viel übrig ist. Zu jeder Eingabe wird automatisch der Zeitpunkt gespeichert (Uhr des Geräts, ohne Internet).
 - **Abrechnung** – Umsatz und Bestellungen, **Umsatz exportieren**, **Absatz exportieren**, am Ende **Zurücksetzen**.
@@ -57,16 +57,16 @@ Dafür im Tab **Menü → Vorlagen** auf **Vorlage exportieren** drücken und au
 
 ## Updates
 
-Die App aktualisiert sich **nie von selbst**. Einmal installiert, läuft sie auf genau der Version, mit der sie installiert wurde — auch wenn du sie mit WLAN öffnest.
+Die App wechselt **nie von selbst** auf eine neue Version. Wenn du sie mit Internet öffnest, lädt sie eine neue Version still im Hintergrund herunter — benutzt wird sie aber erst, wenn du es willst:
 
-Wenn du wirklich eine neue Version willst:
+1. Im Tab **Menü** erscheint oben der Hinweis **Neue Version verfügbar**.
+2. Auf **Aktualisieren** tippen und bestätigen.
 
-1. Im Tab **Menü → Vorlagen** auf **Vorlage exportieren** drücken (Sicherung!).
-2. App-Symbol vom Home-Bildschirm löschen.
-3. In Safari erneut `fbumann.github.io/vereinskasse` öffnen und **Zum Home-Bildschirm** hinzufügen.
-4. **Vorlage laden** drücken und die gesicherte Datei wählen.
+Artikel, Menü, Bestand und Bestellungen bleiben dabei erhalten. Solange du nicht tippst, läuft die App weiter auf der bisherigen Version — auch offline.
 
-> **Tipp:** Updates nie kurz vor einer Veranstaltung. Und nicht vergessen: offene Bestellungen im Tab **Abrechnung** gehen bei der Neuinstallation verloren — vorher Umsatz exportieren.
+> **Tipp:** Updates nie während oder kurz vor einer Veranstaltung.
+
+*Ausnahme: Wer noch v27 oder älter installiert hat, wird einmalig automatisch auf die neue Version gebracht, weil die alte Version den Knopf noch nicht kennt.*
 
 ### Zurück auf eine ältere Version
 
@@ -91,7 +91,7 @@ Gemacht für Vereinsfeste. Wenn du sie nutzt, freu ich mich über ein Lebenszeic
 
 ## Für Entwickler
 
-Eine einzige `index.html` plus `sw.js` (Service Worker für Offline). Reines HTML/CSS/JavaScript. Kein Build, keine Abhängigkeiten. `// @ts-check` + JSDoc für Typprüfung im Editor. Daten in `localStorage`. CSV-Export per `Blob`-Download. Sprache: Deutsch, EUR mit `,` als Dezimaltrenner.
+Eine einzige `index.html` plus `sw.js` (Service Worker für Offline und kontrollierte Updates: neue Versionen werden vorab geladen, ausgeliefert wird aber die in der Cache Storage „gepinnte" Version, bis der Nutzer im Menü-Tab aktualisiert). Reines HTML/CSS/JavaScript. Kein Build, keine Abhängigkeiten. `// @ts-check` + JSDoc für Typprüfung im Editor. Daten in `localStorage`. CSV-Export per `Blob`-Download. Sprache: Deutsch, EUR mit `,` als Dezimaltrenner.
 
 Lokale Vorschau: `npx serve -l 3000 . & open http://localhost:3000`
 
@@ -100,7 +100,7 @@ Lokale Vorschau: `npx serve -l 3000 . & open http://localhost:3000`
 Vor dem Merge auf `main` bei nutzersichtbaren Änderungen die Versionsnummer hochzählen. Zwei Stellen müssen synchron sein:
 
 - `index.html`: `const APP_VERSION = 'N'` — wird im Settings-Tab angezeigt und treibt den Release-Workflow.
-- `sw.js`: `const CACHE = 'vereinskasse-vN'` — muss zu `APP_VERSION` passen, sonst serviert der Service Worker veraltete Inhalte.
+- `sw.js`: `const VERSION = 'N'` — muss zu `APP_VERSION` passen. Nur wenn sich `sw.js` ändert, erkennt der Browser eine neue Version und bietet sie im Menü-Tab zum Aktualisieren an.
 
 Commit-Message-Konvention: `Bump to vN` (eigener Commit oder Teil eines Feature-Commits — egal, solange beide Werte zusammen geändert werden).
 
