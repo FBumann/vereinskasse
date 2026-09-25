@@ -1257,18 +1257,24 @@ function renderStock() {
     if (!item) return;
     const purchased = state.stock[id];
     const soldQty = sold.get(id)?.qty ?? 0;
-    const hasStock = typeof purchased === 'number';
-    const remaining = hasStock ? purchased - soldQty : null;
-    const remainingClass = remaining !== null && remaining < 0 ? 'stock-remaining-negative' : '';
-    const remainingText = remaining === null ? '—' : String(remaining);
 
     const row = document.createElement('div');
     row.className = 'stock-row';
     row.innerHTML = `
       <div class="stock-col-name">${escapeHtml(item.name)}</div>
-      <div><input class="stock-input" type="number" inputmode="numeric" placeholder="—" value="${hasStock ? purchased : ''}"></div>
+      <div><input class="stock-input" type="number" inputmode="numeric" placeholder="—" value="${typeof purchased === 'number' ? purchased : ''}"></div>
       <div class="stock-col-num">${soldQty}</div>
-      <div class="stock-col-num ${remainingClass}">${remainingText}</div>`;
+      <div class="stock-col-num" data-remaining></div>`;
+    const remainingEl = /** @type {HTMLElement} */ (row.querySelector('[data-remaining]'));
+    const updateRemaining = () => {
+      const p = state.stock[id];
+      const remaining = typeof p === 'number' ? p - soldQty : null;
+      remainingEl.textContent = remaining === null ? '—' : String(remaining);
+      remainingEl.classList.toggle('stock-remaining-negative', remaining !== null && remaining < 0);
+    };
+    updateRemaining();
+    // Only this row is updated (no full re-render), so tapping the next
+    // input keeps its focus and the keyboard stays open.
     const input = /** @type {HTMLInputElement} */ (row.querySelector('input.stock-input'));
     input.addEventListener('change', () => {
       const v = input.value.trim();
@@ -1279,8 +1285,8 @@ function renderStock() {
         if (Number.isNaN(n)) return;
         state.stock[id] = n;
       }
-      saveAll();
-      renderStock();
+      save(KEYS.stock, state.stock);
+      updateRemaining();
     });
     list.appendChild(row);
   });
