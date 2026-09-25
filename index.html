@@ -70,8 +70,25 @@
   @media (min-width: 768px) {
     #register { flex-direction: row; }
   }
+  .menu-pane {
+    flex: 1; min-height: 0; min-width: 0;
+    display: flex; flex-direction: column;
+    position: relative;
+  }
+  /* Floats over the grid so tiles don't shift under the finger when it appears. */
+  .arrange-bar {
+    position: absolute; left: 12px; right: 12px; bottom: 12px; z-index: 3;
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 8px 8px 14px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 14px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+    color: var(--muted); font-size: 14px;
+  }
+  .arrange-bar span { flex: 1; min-width: 0; }
+  .arrange-bar .btn { flex: 0 0 auto; min-height: 44px; }
   .menu-grid {
     flex: 1; overflow-y: auto; padding: 12px;
+    position: relative;
     display: grid; gap: 10px;
     grid-template-columns: repeat(2, 1fr);
     align-content: start;
@@ -89,6 +106,7 @@
     min-height: 88px;
     display: flex; flex-direction: column; justify-content: center;
     align-items: center; gap: 6px; text-align: center;
+    -webkit-touch-callout: none;
   }
   /* Shadow only on colored buttons — edit in one place to tune. */
   .menu-item--colored {
@@ -99,6 +117,12 @@
   .menu-item:active {
     background: var(--accent); color: white; border-color: var(--accent);
   }
+  /* Long-press feedback: the tile slowly shrinks while held. The delay keeps
+     normal taps unchanged; delay + duration must equal LONG_PRESS_MS. */
+  .menu-item.pressing {
+    scale: 0.9;
+    transition: scale 0.7s ease-in 0.3s;
+  }
   .menu-item .name { font-size: 17px; font-weight: 600; }
   .menu-item .price { font-size: 15px; color: inherit; opacity: 0.9; }
   .menu-item--custom {
@@ -108,6 +132,32 @@
   }
   .menu-item--custom:active {
     background: var(--accent); color: white;
+  }
+  /* Arrange mode: tiles wiggle and can be dragged; tapping does nothing. */
+  .menu-grid.arranging { padding-bottom: 88px; } /* room to scroll past the arrange bar */
+  @keyframes wiggle {
+    0%, 100% { rotate: -1deg; }
+    50% { rotate: 1deg; }
+  }
+  .arranging .menu-item[data-id] {
+    animation: wiggle 0.3s ease-in-out infinite;
+    touch-action: none; cursor: grab;
+    transition: translate 0.15s ease;
+  }
+  .arranging .menu-item[data-id]:nth-child(2n) { animation-delay: -0.15s; }
+  .arranging .menu-item:active {
+    background: var(--menu-bg, var(--surface-2));
+    color: var(--menu-fg, var(--text));
+    border-color: var(--border);
+  }
+  .arranging .menu-item--custom { opacity: 0.4; pointer-events: none; }
+  .arranging .menu-item.dragging {
+    animation: none; transition: none;
+    scale: 1.06; z-index: 2; cursor: grabbing;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .arranging .menu-item[data-id] { animation: none; }
   }
   .menu-empty {
     grid-column: 1 / -1; text-align: center;
@@ -461,7 +511,13 @@
   <main>
     <!-- REGISTER -->
     <section id="register" class="screen active">
-      <div class="menu-grid" id="menuGrid"></div>
+      <div class="menu-pane">
+        <div class="arrange-bar" id="arrangeBar" hidden>
+          <span>Artikel ziehen, um die Reihenfolge zu ändern</span>
+          <button class="btn btn-primary" id="arrangeDone">Fertig</button>
+        </div>
+        <div class="menu-grid" id="menuGrid"></div>
+      </div>
       <div class="cart">
         <div class="cart-items" id="cartItems"></div>
         <div class="cart-footer">
@@ -500,6 +556,7 @@
       <div class="editor-section">
         <h3>Aktives Menü (heute)</h3>
         <div class="editor-list" id="activeList"></div>
+        <p class="hint">Reihenfolge ändern: In der Kasse einen Artikel 1 Sekunde gedrückt halten und an die gewünschte Stelle ziehen.</p>
       </div>
       <div class="editor-section">
         <h3>Bibliothek</h3>
@@ -603,7 +660,7 @@
  */
 
 /** Single source of truth for the app version. Must match sw.js VERSION. */
-const APP_VERSION = '29';
+const APP_VERSION = '30';
 
 /** Fixed palette for menu item colors. Empty string = default (no color). */
 const COLORS = [
@@ -771,6 +828,7 @@ document.querySelectorAll('nav.tabs button').forEach(btn => {
 
 /** @param {string} tab */
 function showTab(tab) {
+  setArranging(false);
   document.querySelectorAll('nav.tabs button').forEach(b => {
     const t = /** @type {HTMLElement} */ (b).dataset.tab;
     b.classList.toggle('active', t === tab);
@@ -797,8 +855,11 @@ function renderRegister() {
       btn.style.setProperty('--menu-bg', item.color);
       btn.style.setProperty('--menu-fg', 'white');
     }
+    btn.dataset.id = item.id;
     btn.innerHTML = `<div class="name">${escapeHtml(item.name)}</div><div class="price">${fmt(item.price)}</div>`;
-    btn.addEventListener('click', () => addToCart(item));
+    btn.addEventListener('click', () => { if (!arranging) addToCart(item); });
+    btn.addEventListener('pointerdown', e => onTilePointerDown(e, btn));
+    btn.addEventListener('contextmenu', e => e.preventDefault());
     grid.appendChild(btn);
   });
 
@@ -813,10 +874,160 @@ function renderRegister() {
   const customBtn = document.createElement('button');
   customBtn.className = 'menu-item menu-item--custom';
   customBtn.innerHTML = '<div class="name">+ Sonstiges</div><div class="price">Freier Betrag</div>';
-  customBtn.addEventListener('click', openCustomAmount);
+  customBtn.addEventListener('click', () => { if (!arranging) openCustomAmount(); });
   grid.appendChild(customBtn);
 
   renderCart();
+}
+
+// ---- Register: arrange tiles ----
+// Long-press a tile to enter arrange mode (like the iOS home screen), then
+// drag tiles to reorder. The order is state.active, so it also applies to
+// the editor and stock lists. Stays on until "Fertig" or a tab switch.
+const LONG_PRESS_MS = 1000; // twice the usual long-press, so a slow tap while selling doesn't trigger it
+const LONG_PRESS_TOLERANCE = 10;
+const AUTOSCROLL_EDGE = 48;
+
+let arranging = false;
+
+/**
+ * @typedef {{
+ *   pointerId: number, tile: HTMLElement,
+ *   grabX: number, grabY: number, x: number, y: number,
+ *   raf: number, ac: AbortController
+ * }} DragState
+ */
+/** @type {DragState | null} */
+let drag = null;
+
+/** @param {boolean} on */
+function setArranging(on) {
+  if (!on && drag) endDrag();
+  arranging = on;
+  byId('menuGrid').classList.toggle('arranging', on);
+  byId('arrangeBar').hidden = !on;
+}
+
+byId('arrangeDone').addEventListener('click', () => setArranging(false));
+
+// Long-press then drag happens in one gesture that started as a potential
+// scroll; block the scroll so the browser doesn't cancel the pointer.
+byId('menuGrid').addEventListener('touchmove', e => { if (drag) e.preventDefault(); }, { passive: false });
+
+/** @param {PointerEvent} e @param {HTMLElement} tile */
+function onTilePointerDown(e, tile) {
+  if (e.button !== 0 || drag) return;
+  if (arranging) {
+    e.preventDefault();
+    startDrag(e.pointerId, e.clientX, e.clientY, tile);
+    return;
+  }
+  const { pointerId } = e;
+  const x0 = e.clientX, y0 = e.clientY;
+  let x = x0, y = y0;
+  const ac = new AbortController();
+  tile.classList.add('pressing');
+  const timer = setTimeout(() => {
+    ac.abort();
+    tile.classList.remove('pressing');
+    setArranging(true);
+    startDrag(pointerId, x, y, tile);
+  }, LONG_PRESS_MS);
+  const cancel = () => { clearTimeout(timer); ac.abort(); tile.classList.remove('pressing'); };
+  window.addEventListener('pointermove', ev => {
+    if (ev.pointerId !== pointerId) return;
+    x = ev.clientX; y = ev.clientY;
+    if (Math.hypot(x - x0, y - y0) > LONG_PRESS_TOLERANCE) cancel();
+  }, { signal: ac.signal });
+  window.addEventListener('pointerup', cancel, { signal: ac.signal });
+  window.addEventListener('pointercancel', cancel, { signal: ac.signal });
+}
+
+/** Tile's untransformed top-left in viewport coordinates. @param {HTMLElement} tile */
+function tileOrigin(tile) {
+  const grid = byId('menuGrid');
+  const g = grid.getBoundingClientRect();
+  return { left: g.left + tile.offsetLeft - grid.scrollLeft, top: g.top + tile.offsetTop - grid.scrollTop };
+}
+
+/** @param {number} pointerId @param {number} x @param {number} y @param {HTMLElement} tile */
+function startDrag(pointerId, x, y, tile) {
+  const o = tileOrigin(tile);
+  const ac = new AbortController();
+  drag = { pointerId, tile, grabX: x - o.left, grabY: y - o.top, x, y, raf: 0, ac };
+  tile.classList.add('dragging');
+  window.addEventListener('pointermove', e => {
+    if (e.pointerId === pointerId) moveDrag(e.clientX, e.clientY);
+  }, { signal: ac.signal });
+  const end = /** @param {PointerEvent} e */ e => { if (e.pointerId === pointerId) endDrag(); };
+  window.addEventListener('pointerup', end, { signal: ac.signal });
+  window.addEventListener('pointercancel', end, { signal: ac.signal });
+  drag.raf = requestAnimationFrame(autoScroll);
+}
+
+/** @param {number} x @param {number} y */
+function moveDrag(x, y) {
+  if (!drag) return;
+  drag.x = x; drag.y = y;
+  const { tile } = drag;
+  const tiles = /** @type {HTMLElement[]} */ ([...byId('menuGrid').querySelectorAll('.menu-item[data-id]')]);
+  // Hit-test layout slots, not visual rects: tiles still sliding away would
+  // otherwise be hit again at their old spot and bounce back.
+  const target = tiles.find(t => {
+    if (t === tile) return false;
+    const o = tileOrigin(t);
+    return x >= o.left && x <= o.left + t.offsetWidth && y >= o.top && y <= o.top + t.offsetHeight;
+  });
+  if (target) {
+    // FLIP: remember where the other tiles were so they slide, not jump.
+    const before = new Map(tiles.map(t => [t, { left: t.offsetLeft, top: t.offsetTop }]));
+    if (tiles.indexOf(tile) < tiles.indexOf(target)) target.after(tile);
+    else target.before(tile);
+    tiles.forEach(t => {
+      const prev = before.get(t);
+      if (t === tile || !prev) return;
+      const dx = prev.left - t.offsetLeft, dy = prev.top - t.offsetTop;
+      if (!dx && !dy) return;
+      t.style.transition = 'none';
+      t.style.setProperty('translate', `${dx}px ${dy}px`);
+      void t.offsetWidth; // commit the inverted position before animating
+      t.style.transition = '';
+      t.style.removeProperty('translate');
+    });
+  }
+  const o = tileOrigin(tile);
+  tile.style.setProperty('translate', `${x - drag.grabX - o.left}px ${y - drag.grabY - o.top}px`);
+}
+
+/** Scroll the grid while the dragged tile is held near its top or bottom edge. */
+function autoScroll() {
+  if (!drag) return;
+  const grid = byId('menuGrid');
+  const g = grid.getBoundingClientRect();
+  let dy = 0;
+  if (drag.y < g.top + AUTOSCROLL_EDGE) dy = -(g.top + AUTOSCROLL_EDGE - drag.y);
+  else if (drag.y > g.bottom - AUTOSCROLL_EDGE) dy = drag.y - (g.bottom - AUTOSCROLL_EDGE);
+  if (dy) {
+    const prev = grid.scrollTop;
+    grid.scrollTop += Math.max(-12, Math.min(12, dy / 3));
+    if (grid.scrollTop !== prev) moveDrag(drag.x, drag.y);
+  }
+  drag.raf = requestAnimationFrame(autoScroll);
+}
+
+function endDrag() {
+  if (!drag) return;
+  const { tile, raf, ac } = drag;
+  drag = null;
+  cancelAnimationFrame(raf);
+  ac.abort();
+  tile.classList.remove('dragging');
+  tile.style.removeProperty('translate');
+  const order = [...byId('menuGrid').querySelectorAll('.menu-item[data-id]')]
+    .map(el => /** @type {HTMLElement} */ (el).dataset.id ?? '');
+  // Keep any active ids that weren't rendered (unknown items) at the end.
+  state.active = [...order, ...state.active.filter(id => !order.includes(id))];
+  save(KEYS.active, state.active);
 }
 
 function openCustomAmount() {
