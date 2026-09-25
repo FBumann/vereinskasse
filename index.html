@@ -583,7 +583,6 @@
       <input class="modal-form-input" id="modalEditName" type="text" placeholder="Name">
       <input class="modal-form-input" id="modalEditPrice" type="text" inputmode="decimal" placeholder="0,00">
     </div>
-    <input class="input-cash" id="modalInput" type="text" inputmode="decimal" placeholder="0,00" hidden>
     <p class="form-error" id="modalError" hidden></p>
     <div class="modal-actions">
       <button class="btn btn-secondary" id="modalCancel">Abbrechen</button>
@@ -821,10 +820,10 @@ function renderRegister() {
 }
 
 function openCustomAmount() {
-  priceInputModal('Freier Betrag', price => {
+  customAmountModal((name, price) => {
     state.cart.push({
       id: 'custom-' + uid(),
-      name: 'Sonstiges',
+      name,
       price,
       color: '',
       qty: 1,
@@ -833,7 +832,6 @@ function openCustomAmount() {
   });
 }
 
-/** @param {MenuItem} item */
 /** @param {MenuItem} item */
 function addToCart(item) {
   const existing = state.cart.find(c => c.id === item.id);
@@ -1264,14 +1262,16 @@ byId('clearDay').addEventListener('click', () => {
 });
 
 /** Tally items sold per id across all orders. Old orders only stored
- * name; resolve those via the current library. */
+ * name; resolve those via the current library. Free amounts ("Sonstiges")
+ * get a fresh id each time, so they are grouped by name instead. */
 function soldByItem() {
   const nameToId = new Map(state.reusables.map(r => [r.name, r.id]));
   /** @type {Map<string, { name: string, qty: number }>} */
   const counts = new Map();
   state.orders.forEach(o => {
     o.items.forEach(i => {
-      const id = i.id ?? nameToId.get(i.name) ?? i.name;
+      const id = i.id?.startsWith('custom-') ? 'custom:' + i.name
+        : i.id ?? nameToId.get(i.name) ?? i.name;
       const entry = counts.get(id) ?? { name: i.name, qty: 0 };
       entry.qty += i.qty;
       counts.set(id, entry);
@@ -1418,7 +1418,6 @@ function resetModal() {
   byId('modalText').textContent = '';
   byId('modalPalette').hidden = true;
   byId('modalForm').hidden = true;
-  /** @type {HTMLInputElement} */ (byId('modalInput')).hidden = true;
   clearModalError();
   const confirmBtn = /** @type {HTMLElement} */ (byId('modalConfirm'));
   confirmBtn.hidden = false;
@@ -1460,22 +1459,28 @@ function confirmModal(title, text, cb) {
   byId('modal').classList.add('active');
 }
 
-/** @param {string} title @param {(price: number) => void} cb */
-function priceInputModal(title, cb) {
+/**
+ * Free amount for the cart, with an optional name (defaults to "Sonstiges").
+ * @param {(name: string, price: number) => void} cb
+ */
+function customAmountModal(cb) {
   resetModal();
-  byId('modalTitle').textContent = title;
-  const input = /** @type {HTMLInputElement} */ (byId('modalInput'));
-  input.hidden = false;
-  input.value = '';
+  byId('modalTitle').textContent = 'Freier Betrag';
+  byId('modalForm').hidden = false;
+  const nameIn = /** @type {HTMLInputElement} */ (byId('modalEditName'));
+  const priceIn = /** @type {HTMLInputElement} */ (byId('modalEditPrice'));
+  nameIn.value = '';
+  nameIn.placeholder = 'Bezeichnung (optional)';
+  priceIn.value = '';
   useSaveButton();
   modalCb = () => {
     clearModalError();
-    const v = validatePrice(input.value);
-    if (!v.ok) { showModalError(v.error); return false; }
-    cb(v.value);
+    const p = validatePrice(priceIn.value);
+    if (!p.ok) { showModalError(p.error); return false; }
+    cb(nameIn.value.trim() || 'Sonstiges', p.value);
   };
   byId('modal').classList.add('active');
-  setTimeout(() => input.focus(), 50);
+  setTimeout(() => priceIn.focus(), 50);
 }
 
 /**
@@ -1489,6 +1494,7 @@ function editItemModal(item, cb) {
   const nameIn = /** @type {HTMLInputElement} */ (byId('modalEditName'));
   const priceIn = /** @type {HTMLInputElement} */ (byId('modalEditPrice'));
   nameIn.value = item.name;
+  nameIn.placeholder = 'Name';
   priceIn.value = item.price.toFixed(2).replace('.', ',');
 
   // Inline color picker — tracks a local selection and updates the palette visuals.
